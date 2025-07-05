@@ -12,6 +12,11 @@ on:
         required: false
         default: 'Preview update from GitHub Actions'
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   preview-update:
     name: Publish Preview Update
