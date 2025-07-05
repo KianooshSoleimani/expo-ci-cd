@@ -1,0 +1,60 @@
+name: EAS Submit
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to submit to'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - android
+          # - ios  # Disabled - no Apple Developer account yet
+      profile:
+        description: 'Build profile to submit'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+
+jobs:
+  submit:
+    name: Submit to App Stores
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Submit to App Stores
+        run: |
+          # Only Android submissions for now - no Apple Developer account yet
+          if [ "${{ github.event.inputs.platform }}" = "android" ]; then
+            eas submit --platform=android --profile=${{ github.event.inputs.profile }} --non-interactive --wait
+          else
+            echo "iOS submissions not configured yet - need Apple Developer account"
+            exit 1
+          fi

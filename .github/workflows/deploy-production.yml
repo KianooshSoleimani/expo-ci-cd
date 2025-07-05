@@ -1,0 +1,72 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force new build instead of OTA update'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Check for existing production build
+        id: check-build
+        run: |
+          # Check if we have any production builds
+          BUILD_COUNT=$(eas build:list --platform android --limit 1 --json --non-interactive | jq length)
+          if [ "$BUILD_COUNT" -gt 0 ]; then
+            echo "has_builds=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_builds=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create production build
+        if: steps.check-build.outputs.has_builds == 'false' || github.event.inputs.force_build == 'true'
+        run: |
+          echo "🏗️ Creating new production build..."
+          eas build --platform android --profile production --non-interactive --wait
+
+      - name: Publish OTA update
+        if: steps.check-build.outputs.has_builds == 'true' && github.event.inputs.force_build != 'true'
+        run: |
+          echo "🚀 Publishing OTA update..."
+          eas update --branch production --platform android --message "Production update - ${{ github.sha }}" --non-interactive
+
+      - name: Deployment summary
+        run: |
+          if [ "${{ steps.check-build.outputs.has_builds }}" == "false" ] || [ "${{ github.event.inputs.force_build }}" == "true" ]; then
+            echo "✅ New Android build created and will be submitted to Google Play Store"
+          else
+            echo "✅ OTA update published for Android users"
+          fi
