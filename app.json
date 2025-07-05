@@ -37,6 +37,19 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "20fa8d70-adf2-4ad6-8532-0f6c4e56ee03"
+      }
+    },
+    "owner": "kiaso",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/20fa8d70-adf2-4ad6-8532-0f6c4e56ee03"
     }
   }
 }
