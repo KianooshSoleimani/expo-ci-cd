@@ -35,4 +35,4 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Check Expo configuration
-        run: npx expo doctor
+        run: npx expo-doctor
