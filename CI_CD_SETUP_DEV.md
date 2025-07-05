@@ -39,34 +39,32 @@
 
 ## 📋 Workflows ایجاد شده
 
-### 1. **CI** (`.github/workflows/ci.yml`)
+### 1. **CI/CD Pipeline** (`.github/workflows/ci.yml`)
 
-- **تست خودکار** روی هر push/PR
-- Linting, TypeScript check, Expo validation
-- **هیچ توکنی نیاز نداره**
+**مراحل Sequential:**
+- 🔍 **Test & Validate**: Linting, TypeScript check, Expo validation
+- 🏗️ **Build Application**: ساخت build (فقط main branch)
+- 🚀 **Deploy Update**: انتشار OTA update (فقط main branch)  
+- 📱 **Preview Update**: Preview برای PR/develop branch
 
-### 2. **EAS Build** (`.github/workflows/eas-build.yml`)
+**ترتیب اجرا:**
+```
+Test & Validate → Build Application → Deploy Update
+                ↘ Preview Update (for PR/develop)
+```
 
-- **Manual trigger** برای ساخت build
-- Development, Preview, Production builds
-- **فقط Android** (فعلا)
+### 2. **Manual Build & Submit** (`.github/workflows/manual-build-submit.yml`)
 
-### 3. **EAS Update** (`.github/workflows/eas-update.yml`)
+**مراحل Sequential:**
+- ✅ **Validate & Prepare**: اعتبارسنجی و آماده‌سازی
+- 🏗️ **Build Application**: ساخت manual build
+- 📤 **Submit to Store**: آپلود به استور (اختیاری)
+- 📊 **Summary**: خلاصه نتایج
 
-- **خودکار** روی main branch push
-- OTA updates بدون نیاز به build جدید
-
-### 4. **Preview Update** (`.github/workflows/preview-update.yml`)
-
-- **خودکار** روی feature branches
-- **PR comments** با preview links
-- عالی برای team collaboration
-
-### 5. **Production Deploy** (`.github/workflows/deploy-production.yml`)
-
-- **هوشمند**: اگر build موجود باشه → OTA update
-- اگر build نباشه → build جدید
-- **فقط Android**
+**ترتیب اجرا:**
+```
+Validate & Prepare → Build Application → Submit to Store → Summary
+```
 
 ## 🛠️ دستورات اولیه Setup
 
@@ -86,16 +84,21 @@ eas build:configure
 
 ## 📱 نحوه استفاده
 
-### 1. **CI Testing**
+### 1. **CI/CD Pipeline** (خودکار)
 
-- هر push/PR خودکار test میشه
-- نیازی به کاری نیست
+**مراحل:**
+- **Push/PR** → Test & Validate اجرا میشه
+- **Main branch** → Build + Deploy اجرا میشه
+- **Develop/PR** → Preview Update اجرا میشه
 
-### 2. **Development Build**
+### 2. **Manual Build & Submit**
 
-1. GitHub → **Actions** → **"EAS Build"**
+1. GitHub → **Actions** → **"Manual Build & Submit"**
 2. **"Run workflow"**
-3. Platform: `android`, Profile: `development`
+3. انتخاب کن:
+   - **Platform**: `android`
+   - **Profile**: `development`/`preview`/`production`
+   - **Submit to Store**: `true`/`false`
 
 ### 3. **Preview Testing**
 
@@ -107,16 +110,19 @@ eas build:configure
 ### 4. **Production Deployment**
 
 1. به main branch push کن
-2. **خودکار** production update منتشر میشه
+2. **خودکار** مراحل زیر اجرا میشه:
+   - Test & Validate
+   - Build Application (if needed)
+   - Deploy Update
 
-## 🎯 Workflow مخصوص Development
+## 🎯 Workflow جدید Sequential
 
 ```
-Feature Branch → Preview Update (خودکار)
-      ↓
-Pull Request → Preview Comment (خودکار)
-      ↓
-Merge to Main → Production Update (خودکار)
+Push/PR → 1️⃣ Test & Validate
+              ↓
+Main → 2️⃣ Build Application → 3️⃣ Deploy Update
+              ↓
+PR/Develop → 4️⃣ Preview Update → PR Comment
 ```
 
 ## 🔄 آینده: وقتی Apple Developer Account گرفتی

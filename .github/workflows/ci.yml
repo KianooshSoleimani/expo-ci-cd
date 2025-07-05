@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
@@ -6,9 +6,15 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
-  lint-and-test:
-    name: Lint and Test
+  # مرحله 1: تست و بررسی کد
+  test-and-validate:
+    name: "1️⃣ Test & Validate"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -36,3 +42,162 @@ jobs:
 
       - name: Check Expo configuration
         run: npx expo-doctor
+
+  # مرحله 2: ساخت اپلیکیشن (فقط برای main branch)
+  build-application:
+    name: "2️⃣ Build Application"
+    runs-on: ubuntu-latest
+    needs: test-and-validate
+    if: github.ref == 'refs/heads/main'
+    environment: CI CD
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Check for existing production build
+        id: check-build
+        run: |
+          # Check if we have any production builds
+          BUILD_COUNT=$(eas build:list --platform android --limit 1 --json --non-interactive | jq length)
+          if [ "$BUILD_COUNT" -gt 0 ]; then
+            echo "has_builds=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_builds=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create production build (if needed)
+        if: steps.check-build.outputs.has_builds == 'false'
+        run: |
+          echo "🏗️ Creating new production build..."
+          eas build --platform android --profile production --non-interactive --wait
+
+  # مرحله 3: انتشار آپدیت
+  deploy-update:
+    name: "3️⃣ Deploy Update"
+    runs-on: ubuntu-latest
+    needs: [test-and-validate, build-application]
+    if: github.ref == 'refs/heads/main' && !cancelled() && !failure()
+    environment: CI CD
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish production update
+        run: |
+          echo "🚀 Publishing production OTA update..."
+          eas update --branch production --platform android --message "Production update - ${{ github.sha }}" --non-interactive
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Production update published successfully"
+          echo "📱 Android users will receive the update automatically"
+
+  # مرحله 4: Preview Update (فقط برای PR و develop branch)
+  preview-update:
+    name: "4️⃣ Preview Update"
+    runs-on: ubuntu-latest
+    needs: test-and-validate
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'pull_request'
+    environment: CI CD
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Get branch name
+        id: branch
+        run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+
+      - name: Publish preview update
+        run: |
+          BRANCH_NAME="${{ steps.branch.outputs.branch }}"
+          # Replace special characters for branch name
+          CLEAN_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g')
+          MESSAGE="Preview update from GitHub Actions"
+
+          eas update --branch="preview-$CLEAN_BRANCH" --message="$MESSAGE - ${{ github.sha }}" --non-interactive
+
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref.replace(/[^a-zA-Z0-9]/g, '-');
+            const message = `🚀 **Preview Update Published!**
+
+            Branch: \`preview-${branch}\`
+
+            You can test this update by:
+            1. Opening your development build
+            2. Navigating to the branch: \`preview-${branch}\`
+
+            Or scan the QR code on the [Expo dashboard](https://expo.dev/accounts/[username]/projects/ci-cd/updates).`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });

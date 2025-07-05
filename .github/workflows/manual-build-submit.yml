@@ -1,0 +1,197 @@
+name: Manual Build & Submit
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build/submit'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          # - ios  # Disabled - no Apple Developer account yet
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+      submit_to_store:
+        description: 'Submit to app store after build'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # مرحله 1: اعتبارسنجی و آماده‌سازی
+  validate-inputs:
+    name: "1️⃣ Validate & Prepare"
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      should_submit: ${{ steps.check.outputs.should_submit }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Run ESLint
+        run: pnpm run lint
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Check Expo configuration
+        run: npx expo-doctor
+
+      - name: Validate inputs
+        id: check
+        run: |
+          echo "should_build=true" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.inputs.submit_to_store }}" == "true" ]; then
+            echo "should_submit=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_submit=false" >> $GITHUB_OUTPUT
+          fi
+
+  # مرحله 2: ساخت اپلیکیشن
+  build-app:
+    name: "2️⃣ Build Application"
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    if: needs.validate-inputs.outputs.should_build == 'true'
+    environment: CI CD
+    outputs:
+      build_id: ${{ steps.build.outputs.build_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build application
+        id: build
+        run: |
+          echo "🏗️ Building ${{ github.event.inputs.platform }} app with ${{ github.event.inputs.profile }} profile..."
+          
+          # Build and capture build ID
+          BUILD_OUTPUT=$(eas build --platform=${{ github.event.inputs.platform }} --profile=${{ github.event.inputs.profile }} --non-interactive --wait --json)
+          BUILD_ID=$(echo $BUILD_OUTPUT | jq -r '.[] | select(.platform == "${{ github.event.inputs.platform }}") | .id')
+          
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "✅ Build completed with ID: $BUILD_ID"
+
+  # مرحله 3: آپلود به استور (اختیاری)
+  submit-to-store:
+    name: "3️⃣ Submit to Store"
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, build-app]
+    if: needs.validate-inputs.outputs.should_submit == 'true' && needs.build-app.outputs.build_id != ''
+    environment: CI CD
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Submit to app store
+        run: |
+          echo "📤 Submitting to ${{ github.event.inputs.platform }} app store..."
+          
+          # Only Android submissions for now - no Apple Developer account yet
+          if [ "${{ github.event.inputs.platform }}" = "android" ]; then
+            eas submit --platform=android --id=${{ needs.build-app.outputs.build_id }} --non-interactive --wait
+          else
+            echo "iOS submissions not configured yet - need Apple Developer account"
+            exit 1
+          fi
+
+  # مرحله 4: خلاصه نتایج
+  summary:
+    name: "4️⃣ Summary"
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, build-app, submit-to-store]
+    if: always()
+    steps:
+      - name: Build and submit summary
+        run: |
+          echo "## 📊 Build & Submit Summary"
+          echo ""
+          echo "**Platform:** ${{ github.event.inputs.platform }}"
+          echo "**Profile:** ${{ github.event.inputs.profile }}"
+          echo "**Build ID:** ${{ needs.build-app.outputs.build_id || 'N/A' }}"
+          echo ""
+          
+          if [ "${{ needs.build-app.result }}" == "success" ]; then
+            echo "✅ **Build:** Successful"
+          else
+            echo "❌ **Build:** Failed"
+          fi
+          
+          if [ "${{ github.event.inputs.submit_to_store }}" == "true" ]; then
+            if [ "${{ needs.submit-to-store.result }}" == "success" ]; then
+              echo "✅ **Submit:** Successful"
+            else
+              echo "❌ **Submit:** Failed"
+            fi
+          else
+            echo "⏭️ **Submit:** Skipped (not requested)"
+          fi
+          
+          echo ""
+          echo "**Workflow completed at:** $(date)" 

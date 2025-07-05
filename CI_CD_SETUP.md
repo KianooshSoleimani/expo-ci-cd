@@ -81,35 +81,32 @@ eas submit:configure
 
 ## Workflow Files Created
 
-### 1. **CI Workflow** (`.github/workflows/ci.yml`)
+### 1. **CI/CD Pipeline** (`.github/workflows/ci.yml`)
 
-- Runs on every push and pull request
-- Performs linting, type checking, and Expo configuration validation
-- No tokens required
+**Sequential Steps:**
+- 🔍 **Test & Validate**: Linting, TypeScript check, Expo validation
+- 🏗️ **Build Application**: Create build (main branch only)
+- 🚀 **Deploy Update**: Publish OTA update (main branch only)
+- 📱 **Preview Update**: Preview for PR/develop branch
 
-### 2. **EAS Build Workflow** (`.github/workflows/eas-build.yml`)
+**Execution Order:**
+```
+Test & Validate → Build Application → Deploy Update
+                ↘ Preview Update (for PR/develop)
+```
 
-- Manual trigger for creating builds
-- Requires: `EXPO_TOKEN`
-- Supports development, preview, and production builds
+### 2. **Manual Build & Submit** (`.github/workflows/manual-build-submit.yml`)
 
-### 3. **EAS Update Workflow** (`.github/workflows/eas-update.yml`)
+**Sequential Steps:**
+- ✅ **Validate & Prepare**: Validation and preparation
+- 🏗️ **Build Application**: Create manual build
+- 📤 **Submit to Store**: Upload to store (optional)
+- 📊 **Summary**: Results summary
 
-- Automatically publishes OTA updates on main branch pushes
-- Requires: `EXPO_TOKEN`
-- Can also be triggered manually
-
-### 4. **EAS Submit Workflow** (`.github/workflows/eas-submit.yml`)
-
-- Manual trigger for submitting to app stores
-- Requires: `EXPO_TOKEN` + app store credentials
-- Supports both iOS and Android submissions
-
-### 5. **Production Deploy Workflow** (`.github/workflows/deploy-production.yml`)
-
-- Advanced workflow that checks for existing builds
-- Creates new builds if needed, otherwise publishes OTA updates
-- Requires: `EXPO_TOKEN`
+**Execution Order:**
+```
+Validate & Prepare → Build Application → Submit to Store → Summary
+```
 
 ## EAS Configuration
 
@@ -122,25 +119,47 @@ The `eas.json` file has been created with the following profiles:
 
 ## Usage
 
-### Running CI
+### 1. **CI/CD Pipeline** (Automatic)
 
-CI runs automatically on pushes and pull requests to main/develop branches.
+**Steps:**
+- **Push/PR** → Test & Validate runs automatically
+- **Main branch** → Build + Deploy runs automatically
+- **Develop/PR** → Preview Update runs automatically
 
-### Creating Development Builds
+### 2. **Manual Build & Submit**
 
 1. Go to Actions tab in your GitHub repository
-2. Select "EAS Build" workflow
+2. Select "Manual Build & Submit" workflow
 3. Click "Run workflow"
-4. Choose platform (all/android/ios) and profile (development)
+4. Choose:
+   - **Platform**: `android`
+   - **Profile**: `development`/`preview`/`production`
+   - **Submit to Store**: `true`/`false`
 
-### Publishing Updates
+### 3. **Preview Testing**
 
-Updates are published automatically when you push to the main branch, or you can trigger manually.
+1. Create new branch: `git checkout -b feature/my-feature`
+2. Push changes
+3. **Automatic** preview update is published
+4. If PR exists, comment is added with preview link
 
-### Submitting to App Stores
+### 4. **Production Deployment**
 
-1. First, create a production build using the EAS Build workflow
-2. Then use the EAS Submit workflow to submit to stores
+1. Push to main branch
+2. **Automatic** sequential execution:
+   - Test & Validate
+   - Build Application (if needed)
+   - Deploy Update
+
+## 🎯 New Sequential Workflow
+
+```
+Push/PR → 1️⃣ Test & Validate
+              ↓
+Main → 2️⃣ Build Application → 3️⃣ Deploy Update
+              ↓
+PR/Develop → 4️⃣ Preview Update → PR Comment
+```
 
 ## Additional Configuration
 
