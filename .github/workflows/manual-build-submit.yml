@@ -1,10 +1,10 @@
-name: Manual Build & Submit
+name: Manual Build & Deploy
 
 on:
   workflow_dispatch:
     inputs:
       platform:
-        description: 'Platform to build/submit'
+        description: 'Platform to build'
         required: true
         default: 'android'
         type: choice
@@ -25,18 +25,77 @@ on:
         required: false
         default: false
         type: boolean
+      custom_version:
+        description: 'Custom version (optional)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
-  # مرحله 1: اعتبارسنجی و آماده‌سازی
-  validate-inputs:
-    name: "1️⃣ Validate & Prepare"
+  validate-and-prepare:
+    name: "Validate & Prepare"
     runs-on: ubuntu-latest
     outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      should_submit: ${{ steps.check.outputs.should_submit }}
+      should-build: ${{ steps.validation.outputs.should-build }}
+      should-submit: ${{ steps.validation.outputs.should-submit }}
+      build-version: ${{ steps.version.outputs.build-version }}
+      profile-type: ${{ steps.validation.outputs.profile-type }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Validate inputs and determine profile type
+        id: validation
+        run: |
+          echo "should-build=true" >> $GITHUB_OUTPUT
+          
+          if [[ "${{ github.event.inputs.submit_to_store }}" == "true" ]]; then
+            echo "should-submit=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-submit=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Determine profile type for versioning
+          case "${{ github.event.inputs.profile }}" in
+            "production")
+              echo "profile-type=release" >> $GITHUB_OUTPUT
+              ;;
+            "preview")
+              echo "profile-type=beta" >> $GITHUB_OUTPUT
+              ;;
+            "development")
+              echo "profile-type=dev" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Generate build version
+        id: version
+        run: |
+          if [[ -n "${{ github.event.inputs.custom_version }}" ]]; then
+            BUILD_VERSION="${{ github.event.inputs.custom_version }}"
+          else
+            # Get current version from app.json
+            CURRENT_VERSION=$(cat app.json | jq -r '.expo.version // "1.0.0"')
+            
+            # Generate version based on profile
+            case "${{ github.event.inputs.profile }}" in
+              "production")
+                BUILD_VERSION="$CURRENT_VERSION"
+                ;;
+              "preview")
+                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                BUILD_VERSION="$CURRENT_VERSION-beta-$TIMESTAMP"
+                ;;
+              "development")
+                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                SHORT_SHA=${GITHUB_SHA:0:7}
+                BUILD_VERSION="$CURRENT_VERSION-dev-$TIMESTAMP-$SHORT_SHA"
+                ;;
+            esac
+          fi
+          
+          echo "build-version=$BUILD_VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $BUILD_VERSION for ${{ github.event.inputs.profile }} profile"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2
@@ -52,34 +111,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Run ESLint
-        run: pnpm run lint
-
-      - name: TypeScript check
-        run: npx tsc --noEmit
-
-      - name: Check Expo configuration
-        run: npx expo-doctor
-
-      - name: Validate inputs
-        id: check
+      - name: Run code quality checks
         run: |
-          echo "should_build=true" >> $GITHUB_OUTPUT
-          if [ "${{ github.event.inputs.submit_to_store }}" == "true" ]; then
-            echo "should_submit=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_submit=false" >> $GITHUB_OUTPUT
-          fi
+          echo "Running code quality checks for ${{ github.event.inputs.profile }} build..."
+          pnpm run lint
+          npx tsc --noEmit
+          npx expo-doctor
 
-  # مرحله 2: ساخت اپلیکیشن
-  build-app:
-    name: "2️⃣ Build Application"
+  create-build:
+    name: "Create ${{ github.event.inputs.profile }} Build"
     runs-on: ubuntu-latest
-    needs: validate-inputs
-    if: needs.validate-inputs.outputs.should_build == 'true'
+    needs: validate-and-prepare
+    if: needs.validate-and-prepare.outputs.should-build == 'true'
     environment: CI CD
     outputs:
-      build_id: ${{ steps.build.outputs.build_id }}
+      build-id: ${{ steps.build.outputs.build-id }}
+      build-url: ${{ steps.build.outputs.build-url }}
+      download-url: ${{ steps.build.outputs.download-url }}
+      qr-url: ${{ steps.build.outputs.qr-url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -108,22 +157,56 @@ jobs:
       - name: Build application
         id: build
         run: |
-          echo "🏗️ Building ${{ github.event.inputs.platform }} app with ${{ github.event.inputs.profile }} profile..."
+          PLATFORM="${{ github.event.inputs.platform }}"
+          PROFILE="${{ github.event.inputs.profile }}"
+          VERSION="${{ needs.validate-and-prepare.outputs.build-version }}"
           
-          # Build and capture build ID
-          BUILD_OUTPUT=$(eas build --platform=${{ github.event.inputs.platform }} --profile=${{ github.event.inputs.profile }} --non-interactive --wait --json)
-          BUILD_ID=$(echo $BUILD_OUTPUT | jq -r '.[] | select(.platform == "${{ github.event.inputs.platform }}") | .id')
+          echo "Building $PLATFORM app with $PROFILE profile"
+          echo "Version: $VERSION"
           
-          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
-          echo "✅ Build completed with ID: $BUILD_ID"
+          # Create build and capture output
+          BUILD_OUTPUT=$(eas build \
+            --platform="$PLATFORM" \
+            --profile="$PROFILE" \
+            --non-interactive \
+            --wait \
+            --json)
+          
+          # Extract build information
+          BUILD_ID=$(echo $BUILD_OUTPUT | jq -r '.[0].id')
+          BUILD_URL=$(echo $BUILD_OUTPUT | jq -r '.[0].logsUrl')
+          DOWNLOAD_URL=$(echo $BUILD_OUTPUT | jq -r '.[0].artifacts.buildUrl // "pending"')
+          
+          # Generate QR code URL for development builds
+          if [[ "$PROFILE" == "development" ]]; then
+            PROJECT_ID=$(eas project:info --json | jq -r '.id')
+            QR_URL="https://qr.expo.dev/development-build?url=exp://$PROJECT_ID"
+          else
+            QR_URL="N/A"
+          fi
+          
+          echo "build-id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "build-url=$BUILD_URL" >> $GITHUB_OUTPUT
+          echo "download-url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+          echo "qr-url=$QR_URL" >> $GITHUB_OUTPUT
+          
+          echo "✅ Build completed successfully:"
+          echo "Build ID: $BUILD_ID"
+          echo "Version: $VERSION"
+          echo "Profile: $PROFILE"
+          echo "Platform: $PLATFORM"
+          echo "Build Logs: $BUILD_URL"
+          echo "Download URL: $DOWNLOAD_URL"
 
-  # مرحله 3: آپلود به استور (اختیاری)
   submit-to-store:
-    name: "3️⃣ Submit to Store"
+    name: "Submit to ${{ github.event.inputs.platform }} Store"
     runs-on: ubuntu-latest
-    needs: [validate-inputs, build-app]
-    if: needs.validate-inputs.outputs.should_submit == 'true' && needs.build-app.outputs.build_id != ''
+    needs: [validate-and-prepare, create-build]
+    if: needs.validate-and-prepare.outputs.should-submit == 'true' && needs.create-build.outputs.build-id != ''
     environment: CI CD
+    outputs:
+      submission-id: ${{ steps.submit.outputs.submission-id }}
+      submission-url: ${{ steps.submit.outputs.submission-url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -150,48 +233,94 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Submit to app store
+        id: submit
         run: |
-          echo "📤 Submitting to ${{ github.event.inputs.platform }} app store..."
+          PLATFORM="${{ github.event.inputs.platform }}"
+          BUILD_ID="${{ needs.create-build.outputs.build-id }}"
           
-          # Only Android submissions for now - no Apple Developer account yet
-          if [ "${{ github.event.inputs.platform }}" = "android" ]; then
-            eas submit --platform=android --id=${{ needs.build-app.outputs.build_id }} --non-interactive --wait
+          echo "Submitting build $BUILD_ID to $PLATFORM store..."
+          
+          if [[ "$PLATFORM" == "android" ]]; then
+            SUBMIT_OUTPUT=$(eas submit \
+              --platform=android \
+              --id="$BUILD_ID" \
+              --non-interactive \
+              --wait \
+              --json)
+            
+            SUBMISSION_ID=$(echo $SUBMIT_OUTPUT | jq -r '.id')
+            SUBMISSION_URL=$(echo $SUBMIT_OUTPUT | jq -r '.logsUrl')
+            
+            echo "submission-id=$SUBMISSION_ID" >> $GITHUB_OUTPUT
+            echo "submission-url=$SUBMISSION_URL" >> $GITHUB_OUTPUT
+            
+            echo "✅ Successfully submitted to Google Play Store"
+            echo "Submission ID: $SUBMISSION_ID"
           else
-            echo "iOS submissions not configured yet - need Apple Developer account"
+            echo "❌ iOS submissions not configured - Apple Developer account required"
             exit 1
           fi
 
-  # مرحله 4: خلاصه نتایج
-  summary:
-    name: "4️⃣ Summary"
+  deployment-summary:
+    name: "Deployment Summary"
     runs-on: ubuntu-latest
-    needs: [validate-inputs, build-app, submit-to-store]
+    needs: [validate-and-prepare, create-build, submit-to-store]
     if: always()
     steps:
-      - name: Build and submit summary
+      - name: Generate deployment report
         run: |
-          echo "## 📊 Build & Submit Summary"
+          echo "# 📊 Manual Build & Deploy Summary"
           echo ""
-          echo "**Platform:** ${{ github.event.inputs.platform }}"
-          echo "**Profile:** ${{ github.event.inputs.profile }}"
-          echo "**Build ID:** ${{ needs.build-app.outputs.build_id || 'N/A' }}"
+          echo "**Triggered by:** ${{ github.actor }}"
+          echo "**Timestamp:** $(date)"
+          echo "**Repository:** ${{ github.repository }}"
+          echo "**Commit:** ${{ github.sha }}"
           echo ""
+          echo "## Configuration"
+          echo "- **Platform:** ${{ github.event.inputs.platform }}"
+          echo "- **Profile:** ${{ github.event.inputs.profile }}"
+          echo "- **Version:** ${{ needs.validate-and-prepare.outputs.build-version }}"
+          echo "- **Submit to Store:** ${{ github.event.inputs.submit_to_store }}"
+          echo ""
+          echo "## Results"
           
-          if [ "${{ needs.build-app.result }}" == "success" ]; then
+          # Validation results
+          if [[ "${{ needs.validate-and-prepare.result }}" == "success" ]]; then
+            echo "✅ **Validation:** Passed"
+          else
+            echo "❌ **Validation:** Failed"
+          fi
+          
+          # Build results
+          if [[ "${{ needs.create-build.result }}" == "success" ]]; then
             echo "✅ **Build:** Successful"
+            echo "   - Build ID: ${{ needs.create-build.outputs.build-id }}"
+            echo "   - [Build Logs](${{ needs.create-build.outputs.build-url }})"
+            
+            if [[ "${{ needs.create-build.outputs.download-url }}" != "null" && "${{ needs.create-build.outputs.download-url }}" != "" ]]; then
+              echo "   - [📱 Download APK](${{ needs.create-build.outputs.download-url }})"
+            fi
+            
+            if [[ "${{ needs.create-build.outputs.qr-url }}" != "N/A" ]]; then
+              echo "   - [📱 Development QR Code](${{ needs.create-build.outputs.qr-url }})"
+            fi
           else
             echo "❌ **Build:** Failed"
           fi
           
-          if [ "${{ github.event.inputs.submit_to_store }}" == "true" ]; then
-            if [ "${{ needs.submit-to-store.result }}" == "success" ]; then
-              echo "✅ **Submit:** Successful"
+          # Submission results
+          if [[ "${{ github.event.inputs.submit_to_store }}" == "true" ]]; then
+            if [[ "${{ needs.submit-to-store.result }}" == "success" ]]; then
+              echo "✅ **Store Submission:** Successful"
+              echo "   - Submission ID: ${{ needs.submit-to-store.outputs.submission-id }}"
+              echo "   - [Submission Logs](${{ needs.submit-to-store.outputs.submission-url }})"
             else
-              echo "❌ **Submit:** Failed"
+              echo "❌ **Store Submission:** Failed"
             fi
           else
-            echo "⏭️ **Submit:** Skipped (not requested)"
+            echo "⏭️ **Store Submission:** Skipped (not requested)"
           fi
           
           echo ""
-          echo "**Workflow completed at:** $(date)" 
+          echo "---"
+          echo "_Workflow completed at $(date)_" 
