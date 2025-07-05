@@ -68,14 +68,41 @@ jobs:
               ;;
           esac
 
+      - name: Validate app.json
+        run: |
+          echo "Validating app.json file..."
+          if [ ! -f app.json ]; then
+            echo "❌ app.json not found in current directory!"
+            echo "Current directory: $(pwd)"
+            echo "Files in current directory:"
+            ls -la
+            exit 1
+          fi
+          
+          echo "✅ app.json found, validating JSON syntax..."
+          if ! cat app.json | jq empty; then
+            echo "❌ app.json contains invalid JSON!"
+            echo "Content preview:"
+            head -20 app.json
+            exit 1
+          fi
+          echo "✅ app.json is valid JSON"
+
       - name: Generate build version
         id: version
         run: |
           if [[ -n "${{ github.event.inputs.custom_version }}" ]]; then
             BUILD_VERSION="${{ github.event.inputs.custom_version }}"
+            echo "✅ Using custom version: $BUILD_VERSION"
           else
-            # Get current version from app.json
-            CURRENT_VERSION=$(cat app.json | jq -r '.expo.version // "1.0.0"')
+            # Get current version from app.json with error handling
+            CURRENT_VERSION=$(cat app.json | jq -er '.expo.version // "1.0.0"' || echo "1.0.0")
+            
+            if [[ "$CURRENT_VERSION" == "1.0.0" ]]; then
+              echo "⚠️  Using fallback version 1.0.0 (expo.version not found in app.json)"
+            else
+              echo "✅ Found version in app.json: $CURRENT_VERSION"
+            fi
             
             # Generate version based on profile
             case "${{ github.event.inputs.profile }}" in
@@ -172,14 +199,20 @@ jobs:
             --wait \
             --json)
           
-          # Extract build information
-          BUILD_ID=$(echo $BUILD_OUTPUT | jq -r '.[0].id')
-          BUILD_URL=$(echo $BUILD_OUTPUT | jq -r '.[0].logsUrl')
-          DOWNLOAD_URL=$(echo $BUILD_OUTPUT | jq -r '.[0].artifacts.buildUrl // "pending"')
+          if [[ -z "$BUILD_OUTPUT" ]] || [[ "$BUILD_OUTPUT" == "null" ]]; then
+            echo "❌ Build failed or returned empty output"
+            exit 1
+          fi
+          
+          # Extract build information with error handling
+          BUILD_ID=$(echo "$BUILD_OUTPUT" | jq -r '.[0].id // "unknown"' 2>/dev/null || echo "unknown")
+          BUILD_URL=$(echo "$BUILD_OUTPUT" | jq -r '.[0].logsUrl // "unknown"' 2>/dev/null || echo "unknown")
+          DOWNLOAD_URL=$(echo "$BUILD_OUTPUT" | jq -r '.[0].artifacts.buildUrl // "pending"' 2>/dev/null || echo "pending")
           
           # Generate QR code URL for development builds
           if [[ "$PROFILE" == "development" ]]; then
-            PROJECT_ID=$(eas project:info --json | jq -r '.id')
+            PROJECT_INFO=$(eas project:info --json 2>/dev/null || echo '{"id":"unknown"}')
+            PROJECT_ID=$(echo "$PROJECT_INFO" | jq -r '.id // "unknown"' 2>/dev/null || echo "unknown")
             QR_URL="https://qr.expo.dev/development-build?url=exp://$PROJECT_ID"
           else
             QR_URL="N/A"
@@ -248,8 +281,13 @@ jobs:
               --wait \
               --json)
             
-            SUBMISSION_ID=$(echo $SUBMIT_OUTPUT | jq -r '.id')
-            SUBMISSION_URL=$(echo $SUBMIT_OUTPUT | jq -r '.logsUrl')
+            if [[ -z "$SUBMIT_OUTPUT" ]] || [[ "$SUBMIT_OUTPUT" == "null" ]]; then
+              echo "❌ Submission failed or returned empty output"
+              exit 1
+            fi
+            
+            SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | jq -r '.id // "unknown"' 2>/dev/null || echo "unknown")
+            SUBMISSION_URL=$(echo "$SUBMIT_OUTPUT" | jq -r '.logsUrl // "unknown"' 2>/dev/null || echo "unknown")
             
             echo "submission-id=$SUBMISSION_ID" >> $GITHUB_OUTPUT
             echo "submission-url=$SUBMISSION_URL" >> $GITHUB_OUTPUT

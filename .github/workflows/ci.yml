@@ -35,11 +35,37 @@ jobs:
             echo "branch-type=feature" >> $GITHUB_OUTPUT
           fi
 
+      - name: Validate app.json
+        run: |
+          echo "Validating app.json file..."
+          if [ ! -f app.json ]; then
+            echo "❌ app.json not found in current directory!"
+            echo "Current directory: $(pwd)"
+            echo "Files in current directory:"
+            ls -la
+            exit 1
+          fi
+          
+          echo "✅ app.json found, validating JSON syntax..."
+          if ! cat app.json | jq empty; then
+            echo "❌ app.json contains invalid JSON!"
+            echo "Content preview:"
+            head -20 app.json
+            exit 1
+          fi
+          echo "✅ app.json is valid JSON"
+
       - name: Generate build version
         id: version
         run: |
-          # Get current version from app.json
-          CURRENT_VERSION=$(cat app.json | jq -r '.expo.version // "1.0.0"')
+          # Get current version from app.json with error handling
+          CURRENT_VERSION=$(cat app.json | jq -er '.expo.version // "1.0.0"' || echo "1.0.0")
+          
+          if [[ "$CURRENT_VERSION" == "1.0.0" ]]; then
+            echo "⚠️  Using fallback version 1.0.0 (expo.version not found in app.json)"
+          else
+            echo "✅ Found version in app.json: $CURRENT_VERSION"
+          fi
           
           # Generate build version based on branch type
           if [[ "${{ steps.branch-info.outputs.branch-type }}" == "production" ]]; then
@@ -115,7 +141,17 @@ jobs:
       - name: Check for existing production build
         id: check-build
         run: |
-          BUILD_COUNT=$(eas build:list --platform android --limit 1 --json --non-interactive | jq length)
+          echo "Checking for existing production builds..."
+          BUILD_LIST_OUTPUT=$(eas build:list --platform android --limit 1 --json --non-interactive 2>/dev/null || echo "[]")
+          
+          if [[ "$BUILD_LIST_OUTPUT" == "[]" ]] || [[ -z "$BUILD_LIST_OUTPUT" ]]; then
+            echo "No builds found or command failed"
+            BUILD_COUNT=0
+          else
+            BUILD_COUNT=$(echo "$BUILD_LIST_OUTPUT" | jq length 2>/dev/null || echo 0)
+          fi
+          
+          echo "Found $BUILD_COUNT existing builds"
           if [ "$BUILD_COUNT" -gt 0 ]; then
             echo "has-builds=true" >> $GITHUB_OUTPUT
           else
@@ -130,9 +166,16 @@ jobs:
           
           # Create build with version
           BUILD_OUTPUT=$(eas build --platform android --profile production --non-interactive --wait --json)
-          BUILD_ID=$(echo $BUILD_OUTPUT | jq -r '.[0].id')
-          BUILD_URL=$(echo $BUILD_OUTPUT | jq -r '.[0].logsUrl')
-          DOWNLOAD_URL=$(echo $BUILD_OUTPUT | jq -r '.[0].artifacts.buildUrl // "pending"')
+          
+          if [[ -z "$BUILD_OUTPUT" ]] || [[ "$BUILD_OUTPUT" == "null" ]]; then
+            echo "❌ Build failed or returned empty output"
+            exit 1
+          fi
+          
+          # Parse build information with error handling
+          BUILD_ID=$(echo "$BUILD_OUTPUT" | jq -r '.[0].id // "unknown"' 2>/dev/null || echo "unknown")
+          BUILD_URL=$(echo "$BUILD_OUTPUT" | jq -r '.[0].logsUrl // "unknown"' 2>/dev/null || echo "unknown")
+          DOWNLOAD_URL=$(echo "$BUILD_OUTPUT" | jq -r '.[0].artifacts.buildUrl // "pending"' 2>/dev/null || echo "pending")
           
           echo "build-id=$BUILD_ID" >> $GITHUB_OUTPUT
           echo "build-url=$BUILD_URL" >> $GITHUB_OUTPUT
@@ -256,7 +299,8 @@ jobs:
             --non-interactive
           
           # Generate URLs
-          PROJECT_ID=$(eas project:info --json | jq -r '.id')
+          PROJECT_INFO=$(eas project:info --json 2>/dev/null || echo '{"id":"unknown"}')
+          PROJECT_ID=$(echo "$PROJECT_INFO" | jq -r '.id // "unknown"' 2>/dev/null || echo "unknown")
           PREVIEW_URL="https://expo.dev/accounts/[username]/projects/ci-cd/updates"
           QR_URL="https://qr.expo.dev/eas-update?updateId=$PREVIEW_BRANCH&appScheme=exp"
           
