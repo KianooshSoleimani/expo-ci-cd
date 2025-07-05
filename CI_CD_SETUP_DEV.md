@@ -135,6 +135,17 @@ Merge to Main → Production Update (خودکار)
 - Token expire نشده باشه
 - مطمئن شو که توکن در environment "CI CD" هست، نه در repository secrets
 
+### خطای "Resource not accessible by integration"
+
+- این خطا وقتی workflow نتونه با PR/Issue کار کنه
+- مطمئن شو که workflow فایل‌هایی که با PR کار میکنن، `permissions` داشته باشن:
+  ```yaml
+  permissions:
+    contents: read
+    pull-requests: write
+    issues: write
+  ```
+
 ### خطای "Project not found"
 
 - `eas project:init` رو اجرا کن

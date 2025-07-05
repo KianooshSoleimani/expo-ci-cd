@@ -173,12 +173,23 @@ You can customize the workflows by modifying the YAML files in `.github/workflow
    - Verify the token hasn't expired
    - Make sure the token is in the environment, not in repository secrets
 
-2. **"Project not found"**
+2. **"Resource not accessible by integration"**
+
+   - This error occurs when workflows can't access pull requests or issues
+   - Ensure workflows that interact with PRs have proper permissions:
+     ```yaml
+     permissions:
+       contents: read
+       pull-requests: write
+       issues: write
+     ```
+
+3. **"Project not found"**
 
    - Run `eas project:init` to initialize your project
    - Make sure you're logged in with the correct Expo account
 
-3. **Build failures**
+4. **Build failures**
    - Check that your `eas.json` configuration is correct
    - Verify all dependencies are properly installed
 
