@@ -24,6 +24,7 @@ jobs:
   submit:
     name: Submit to App Stores
     runs-on: ubuntu-latest
+    environment: CI CD
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

@@ -25,13 +25,17 @@
 3. نام: `"GitHub Actions CI/CD"`
 4. توکن رو کپی کن
 
-### قدم 2: اضافه کردن به GitHub
+### قدم 2: اضافه کردن به GitHub Environment
 
-1. برو به repository → **Settings** → **Secrets and variables** → **Actions**
-2. **"New repository secret"**
-3. Name: `EXPO_TOKEN`
-4. Value: توکن کپی شده
-5. **"Add secret"**
+1. برو به repository → **Settings** → **Environments**
+2. **"New environment"** کلیک کن
+3. Name: `CI CD`
+4. **"Configure environment"**
+5. در قسمت **Environment secrets**:
+   - **"Add secret"**
+   - Name: `EXPO_TOKEN`
+   - Value: توکن کپی شده
+   - **"Add secret"**
 
 ## 📋 Workflows ایجاد شده
 
@@ -129,6 +133,7 @@ Merge to Main → Production Update (خودکار)
 
 - `EXPO_TOKEN` رو چک کن
 - Token expire نشده باشه
+- مطمئن شو که توکن در environment "CI CD" هست، نه در repository secrets
 
 ### خطای "Project not found"
 

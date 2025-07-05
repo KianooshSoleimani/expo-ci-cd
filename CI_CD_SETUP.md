@@ -23,13 +23,17 @@ You need to generate an Expo access token for GitHub Actions to authenticate wit
 3. Name it something like "GitHub Actions CI/CD"
 4. Copy the generated token
 
-**Add to GitHub Secrets:**
+**Add to GitHub Environment:**
 
 1. Go to your GitHub repository
-2. Navigate to Settings → Secrets and variables → Actions
-3. Click "New repository secret"
-4. Name: `EXPO_TOKEN`
-5. Value: Your Expo access token
+2. Navigate to Settings → Environments
+3. Click "New environment"
+4. Name: `CI CD`
+5. Click "Configure environment"
+6. In the **Environment secrets** section:
+   - Click "Add secret"
+   - Name: `EXPO_TOKEN`
+   - Value: Your Expo access token
 
 ### 2. App Store Connect API Key (Optional - for iOS submissions)
 
@@ -165,8 +169,9 @@ You can customize the workflows by modifying the YAML files in `.github/workflow
 
 1. **"Authentication failed"**
 
-   - Check that your `EXPO_TOKEN` is correctly set in GitHub secrets
+   - Check that your `EXPO_TOKEN` is correctly set in the "CI CD" environment
    - Verify the token hasn't expired
+   - Make sure the token is in the environment, not in repository secrets
 
 2. **"Project not found"**
 

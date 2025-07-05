@@ -26,6 +26,7 @@ jobs:
   build:
     name: Build on EAS
     runs-on: ubuntu-latest
+    environment: CI CD
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
